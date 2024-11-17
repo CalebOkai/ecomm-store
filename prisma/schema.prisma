@@ -7,8 +7,266 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum ProductType {
+  digital // Delivered electronically
+  physical // Tangible, requires shipping
+  service // Non-tangible services (e.g., consulting, repair services)
+  bundle // Combination of digital and/or physical products sold as a package
+}
+
+enum ProductCategory {
+  // Digital Goods
+  airtime // Mobile airtime top-ups
+  voucher // Gift cards or prepaid vouchers (e.g., Amazon, iTunes)
+  subscription // Subscriptions for digital services (e.g., Netflix, Spotify)
+  ebook // Electronic books
+  gaming // Game credits, skins, or gift cards for platforms like Steam
+  utilities // Digital payments for utility bills (e.g., electricity, water)
+  entertainment // Movie tickets, concert passes, or digital event access
+  license // Software licenses (e.g., productivity tools, antivirus)
+
+  // Physical Goods
+  electronics // Mobile phones, laptops, gadgets
+  apparel // Clothing, footwear, accessories
+  appliance // Kitchen appliances, smart home devices
+  books // Physical books, e-books (if physical and digital)
+  cosmetics // Cosmetics, skincare, grooming products
+  groceries // Food, drinks
+
+  // Hybrid Goods
+  bundle // Combination of digital and/or physical products
+  service // Non-tangible services (e.g., consulting, repair, tutoring)
+}
+
+enum TxnStatus {
+  processing
+  successful
+  cancelled
+  failed
+  // Refund States
+  refundRequested
+  refundProcesing
+  refundSuccess
+  refundDenied
+  refundFailed
+}
+
+enum PaymentMethod {
+  card
+  cash
+  mtnMomo
+  vodaCash
+  airtelTigoMoney
+}
+
+enum OrderStatus {
+  unstarted
+  processing
+  failed
+  successful
+  refunded
+  cancelled
+}
+
+enum InventoryTxnType {
+  restock // Stock added to inventory
+  sale // Stock subtracted due to sale
+  return // Stock added back due to return
+}
+
+enum CartReservationStatus {
+  pending
+  confirmed
+  canceled
+}
+
+model InventoryTxn {
+  id               Int              @id @default(autoincrement())
+  type             InventoryTxnType
+  quantity         Int // Amount added or subtracted (positive for restocks, negative for sales)
+  pricePerUnit     Int?
+  productVariant   ProductVariant   @relation(fields: [productVariantId], references: [id], onDelete: Cascade)
+  productVariantId String
+  description      String // Reason for the transaction (e.g., 'order #123', 'manual restock')
+  order            Order?           @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  orderId          String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+}
+
 model Product {
-  id        Int      @id @default(autoincrement())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id           String           @id @default(uuid())
+  name         String
+  details      String           @default("")
+  images       String[]         @default([])
+  active       Boolean          @default(true)
+  type         ProductType
+  category     ProductCategory
+  currency     String           @default("GHS")
+  storeId      String
+  uploadedById String
+  variants     ProductVariant[]
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+}
+
+model ProductVariant {
+  id              String                   @id @default(uuid())
+  active          Boolean                  @default(true)
+  images          String[]                 @default([])
+  primaryVariant  Boolean                  @default(false)
+  // Fixed-value pricing
+  subsidizedPrice Int?
+  fullPrice       Int?
+  // Ranged pricing
+  minPrice        Int?
+  maxPrice        Int?
+  inventory       Int                      @default(0)
+  product         Product                  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId       String
+  types           ProductVariantType[]
+  txns            ProductVariantTxn[]
+  orderItems      OrderItem[]
+  wishlistItems   WishlistItem[]
+  cartItems       CartItem[]
+  discounts       ProductVariantDiscount[]
+  inventoryTxns   InventoryTxn[]
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+}
+
+model VariantAttributeType {
+  id          Int                @id @default(autoincrement())
+  name        String // E.g., 'color', 'size', 'material'
+  createdById String
+  options     VariantAttribute[]
+}
+
+model VariantAttribute {
+  id              Int                  @id @default(autoincrement())
+  details         String // e.g., 'Red', 'L', 'Cotton'
+  regex           String               @default("")
+  attributeType   VariantAttributeType @relation(fields: [attributeTypeId], references: [id], onDelete: Cascade)
+  attributeTypeId Int
+  productVariants ProductVariantType[]
+  createdById     String
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+}
+
+model ProductVariantType {
+  id               String           @id @default(uuid())
+  image            String           @default("")
+  attribute        VariantAttribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+  attributeId      Int
+  productVariant   ProductVariant   @relation(fields: [productVariantId], references: [id], onDelete: Cascade)
+  productVariantId String
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+}
+
+model ProductVariantTxn {
+  id               String         @id @default(uuid())
+  amount           Int
+  refundAmount     Int?
+  currency         String
+  rawResponse      Json           @default("{}")
+  status           TxnStatus      @default(processing)
+  productVariant   ProductVariant @relation(fields: [productVariantId], references: [id], onDelete: Cascade)
+  productVariantId String
+  purchasedById    String
+  order            Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId          String
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+}
+
+model ProductVariantDiscount {
+  id              Int                 @id @default(autoincrement())
+  active          Boolean             @default(true)
+  code            String              @unique
+  description     String              @default("")
+  percentage      Decimal? // Percentage-based discount
+  amount          Int? // Fixed amount discount
+  expiresAt       DateTime?
+  createdById     String
+  productVariants ProductVariant[]
+  orderDiscounts  OrderItemDiscount[]
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+}
+
+model WishlistItem {
+  id               Int            @id @default(autoincrement())
+  productVariant   ProductVariant @relation(fields: [productVariantId], references: [id], onDelete: Cascade)
+  productVariantId String
+  userId           String
+
+  @@unique([productVariantId, userId])
+}
+
+model CartItem {
+  id               Int               @id @default(autoincrement())
+  quantity         Int               @default(0)
+  totalCost        Int               @default(0)
+  productVariant   ProductVariant    @relation(fields: [productVariantId], references: [id], onDelete: Cascade)
+  productVariantId String
+  userId           String
+  cartReservations CartReservation[]
+
+  @@unique([productVariantId, userId])
+}
+
+model CartReservation {
+  id         Int                   @id @default(autoincrement())
+  quantity   Int
+  cartItem   CartItem              @relation(fields: [cartItemId], references: [id], onDelete: Cascade)
+  cartItemId Int
+  orderId    String
+  status     CartReservationStatus @default(pending)
+  createdAt  DateTime              @default(now())
+  updatedAt  DateTime              @updatedAt
+}
+
+model OrderItem {
+  id               Int                 @id @default(autoincrement())
+  quantity         Int                 @default(0)
+  totalCost        Int                 @default(0)
+  unitPrice        Int
+  taxRate          Decimal             @default(0) // Taxes applied
+  currency         String
+  productVariant   ProductVariant      @relation(fields: [productVariantId], references: [id], onDelete: Cascade)
+  productVariantId String
+  order            Order               @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId          String
+  discounts        OrderItemDiscount[]
+
+  @@unique([productVariantId, orderId])
+}
+
+model OrderItemDiscount {
+  id          Int                    @id @default(autoincrement())
+  active      Boolean                @default(true)
+  periodStart DateTime
+  periodEnd   DateTime
+  discount    ProductVariantDiscount @relation(fields: [discountId], references: [id], onDelete: Cascade)
+  discountId  Int
+  orderItem   OrderItem              @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  orderItemId Int
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
+}
+
+model Order {
+  id            String              @id @default(uuid())
+  totalCost     Int                 @default(0)
+  status        OrderStatus         @default(unstarted)
+  phoneNumber   String              @default("")
+  paymentMethod PaymentMethod       @default(cash)
+  orderItems    OrderItem[]
+  txns          ProductVariantTxn[]
+  inventoryTxns InventoryTxn[]
+  purchasedById String
+  createdAt     DateTime            @default(now())
+  completedAt   DateTime?
 }
