@@ -39,6 +39,7 @@ enum ProductCategory {
 }
 
 enum TxnStatus {
+  unstarted
   processing
   successful
   cancelled
@@ -57,15 +58,9 @@ enum PaymentMethod {
   mtnMomo
   vodaCash
   airtelTigoMoney
-}
-
-enum OrderStatus {
-  unstarted
-  processing
-  failed
-  successful
-  refunded
-  cancelled
+  paypal
+  applePay
+  googlePay
 }
 
 enum InventoryTxnType {
@@ -74,199 +69,163 @@ enum InventoryTxnType {
   return // Stock added back due to return
 }
 
-enum CartReservationStatus {
-  pending
-  confirmed
-  canceled
-}
-
 model InventoryTxn {
-  id               Int              @id @default(autoincrement())
-  type             InventoryTxnType
-  quantity         Int // Amount added or subtracted (positive for restocks, negative for sales)
-  pricePerUnit     Int?
-  productVariant   ProductVariant   @relation(fields: [productVariantId], references: [id], onDelete: Cascade)
-  productVariantId String
-  description      String // Reason for the transaction (e.g., 'order #123', 'manual restock')
-  order            Order?           @relation(fields: [orderId], references: [id], onDelete: SetNull)
-  orderId          String?
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
+  id              Int                          @id @default(autoincrement())
+  type            InventoryTxnType
+  description     String                       @default("")
+  quantity        Int // Value should be positive for types: ["restock", "return"], negative for ["sale"]
+  costPrice       Int? // Required for type: "restock"
+  sellingPrice    Int // If `orderItem` is present, should be the same value as `orderItem.unitPrice`
+  productOption   ProductVariantPropertyOption @relation(fields: [productOptionId], references: [id], onDelete: Cascade)
+  productOptionId Int
+  orderItem       OrderItem?                   @relation(fields: [orderItemId], references: [id], onDelete: SetNull)
+  orderItemId     Int? // Set Order Item on types: ["sale", "return"]
+  createdAt       DateTime                     @default(now())
+  updatedAt       DateTime                     @updatedAt
+
+  @@unique([productOptionId, orderItemId])
 }
 
 model Product {
-  id           String           @id @default(uuid())
-  name         String
-  details      String           @default("")
-  images       String[]         @default([])
-  active       Boolean          @default(true)
-  type         ProductType
-  category     ProductCategory
-  currency     String           @default("GHS")
-  storeId      String
-  uploadedById String
-  variants     ProductVariant[]
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @updatedAt
+  id            String           @id @default(uuid())
+  name          String // Flannel Shirt
+  details       String           @default("")
+  images        String[]         @default([])
+  active        Boolean          @default(true)
+  currency      String
+  type          ProductType
+  category      ProductCategory
+  storeId       String
+  uploadedById  String
+  variants      ProductVariant[]
+  wishlistItems WishlistItem[]
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
 }
 
 model ProductVariant {
-  id              String                   @id @default(uuid())
-  active          Boolean                  @default(true)
-  images          String[]                 @default([])
-  primaryVariant  Boolean                  @default(false)
+  id         String                   @id @default(uuid())
+  name       String // E.g Long-sleeved / Short-sleeved Flannel Shirt
+  details    String                   @default("")
+  active     Boolean                  @default(true)
+  product    Product                  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId  String
+  properties ProductVariantProperty[]
+  createdAt  DateTime                 @default(now())
+  updatedAt  DateTime                 @updatedAt
+}
+
+model ProductVariantProperty {
+  id               Int                            @id @default(autoincrement())
+  name             String // E.g., "Colour", "Size", "Material"
+  details          String                         @default("")
+  optionRegex      String? // Accepted string formats for each option
+  options          ProductVariantPropertyOption[]
+  productVariant   ProductVariant                 @relation(fields: [productVariantId], references: [id], onDelete: Cascade)
+  productVariantId String
+  createdAt        DateTime                       @default(now())
+  updatedAt        DateTime                       @updatedAt
+}
+
+model ProductVariantPropertyOption {
+  id                Int                     @id @default(autoincrement())
+  name              String // E.g., "Red", "L", "Cotton"
+  details           String                  @default("")
+  images            String[]                @default([])
   // Fixed-value pricing
-  subsidizedPrice Int?
-  fullPrice       Int?
+  price             Int?
   // Ranged pricing
-  minPrice        Int?
-  maxPrice        Int?
-  inventory       Int                      @default(0)
-  product         Product                  @relation(fields: [productId], references: [id], onDelete: Cascade)
-  productId       String
-  types           ProductVariantType[]
-  txns            ProductVariantTxn[]
-  orderItems      OrderItem[]
-  wishlistItems   WishlistItem[]
-  cartItems       CartItem[]
-  discounts       ProductVariantDiscount[]
-  inventoryTxns   InventoryTxn[]
-  createdAt       DateTime                 @default(now())
-  updatedAt       DateTime                 @updatedAt
+  minPrice          Int?
+  maxPrice          Int?
+  inventory         Int                     @default(0)
+  variantProperty   ProductVariantProperty  @relation(fields: [variantPropertyId], references: [id], onDelete: Cascade)
+  variantPropertyId Int
+  inventoryTxns     InventoryTxn[]
+  discounts         ProductOptionDiscount[]
+  cartItems         CartItem[]
+  createdById       String
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+  OrderItem         OrderItem[]
 }
 
-model VariantAttributeType {
-  id          Int                @id @default(autoincrement())
-  name        String // E.g., 'color', 'size', 'material'
-  createdById String
-  options     VariantAttribute[]
-}
-
-model VariantAttribute {
-  id              Int                  @id @default(autoincrement())
-  details         String // e.g., 'Red', 'L', 'Cotton'
-  regex           String               @default("")
-  attributeType   VariantAttributeType @relation(fields: [attributeTypeId], references: [id], onDelete: Cascade)
-  attributeTypeId Int
-  productVariants ProductVariantType[]
-  createdById     String
-  createdAt       DateTime             @default(now())
-  updatedAt       DateTime             @updatedAt
-}
-
-model ProductVariantType {
-  id               String           @id @default(uuid())
-  image            String           @default("")
-  attribute        VariantAttribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
-  attributeId      Int
-  productVariant   ProductVariant   @relation(fields: [productVariantId], references: [id], onDelete: Cascade)
-  productVariantId String
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
-}
-
-model ProductVariantTxn {
-  id               String         @id @default(uuid())
-  amount           Int
-  refundAmount     Int?
-  currency         String
-  rawResponse      Json           @default("{}")
-  status           TxnStatus      @default(processing)
-  productVariant   ProductVariant @relation(fields: [productVariantId], references: [id], onDelete: Cascade)
-  productVariantId String
-  purchasedById    String
-  order            Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  orderId          String
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
-}
-
-model ProductVariantDiscount {
-  id              Int                 @id @default(autoincrement())
-  active          Boolean             @default(true)
-  code            String              @unique
-  description     String              @default("")
-  percentage      Decimal? // Percentage-based discount
-  amount          Int? // Fixed amount discount
-  expiresAt       DateTime?
-  createdById     String
-  productVariants ProductVariant[]
-  orderDiscounts  OrderItemDiscount[]
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
+model ProductOptionDiscount {
+  id             Int                            @id @default(autoincrement())
+  active         Boolean                        @default(true)
+  code           String                         @unique
+  description    String                         @default("")
+  percentage     Decimal? // Percentage-based discount
+  amount         Int? // Fixed amount discount
+  activeFrom     DateTime?
+  activeTo       DateTime?
+  daysDuration   Int?
+  createdById    String
+  productOptions ProductVariantPropertyOption[]
+  orderDiscounts OrderItemDiscount[]
+  createdAt      DateTime                       @default(now())
+  updatedAt      DateTime                       @updatedAt
 }
 
 model WishlistItem {
-  id               Int            @id @default(autoincrement())
-  productVariant   ProductVariant @relation(fields: [productVariantId], references: [id], onDelete: Cascade)
-  productVariantId String
-  userId           String
+  id        Int     @id @default(autoincrement())
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId String
+  userId    String
 
-  @@unique([productVariantId, userId])
+  @@unique([productId, userId])
 }
 
 model CartItem {
-  id               Int               @id @default(autoincrement())
-  quantity         Int               @default(0)
-  totalCost        Int               @default(0)
-  productVariant   ProductVariant    @relation(fields: [productVariantId], references: [id], onDelete: Cascade)
-  productVariantId String
-  userId           String
-  cartReservations CartReservation[]
+  id              Int                          @id @default(autoincrement())
+  quantity        Int
+  totalCost       Int
+  userId          String
+  productOption   ProductVariantPropertyOption @relation(fields: [productOptionId], references: [id], onDelete: Cascade)
+  productOptionId Int
 
-  @@unique([productVariantId, userId])
-}
-
-model CartReservation {
-  id         Int                   @id @default(autoincrement())
-  quantity   Int
-  cartItem   CartItem              @relation(fields: [cartItemId], references: [id], onDelete: Cascade)
-  cartItemId Int
-  orderId    String
-  status     CartReservationStatus @default(pending)
-  createdAt  DateTime              @default(now())
-  updatedAt  DateTime              @updatedAt
+  @@unique([productOptionId, userId])
 }
 
 model OrderItem {
-  id               Int                 @id @default(autoincrement())
-  quantity         Int                 @default(0)
-  totalCost        Int                 @default(0)
-  unitPrice        Int
-  taxRate          Decimal             @default(0) // Taxes applied
-  currency         String
-  productVariant   ProductVariant      @relation(fields: [productVariantId], references: [id], onDelete: Cascade)
-  productVariantId String
-  order            Order               @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  orderId          String
-  discounts        OrderItemDiscount[]
+  id              Int                          @id @default(autoincrement())
+  unitPrice       Int
+  quantity        Int
+  totalCost       Int
+  tax             Int?
+  refundAmount    Int?
+  currency        String // Currency in which the user pays for this item
+  txnResponse     Json? // Digital product details would be stored here. Metadata for physical products can be stored as well.
+  status          TxnStatus                    @default(unstarted)
+  productOption   ProductVariantPropertyOption @relation(fields: [productOptionId], references: [id], onDelete: Restrict)
+  productOptionId Int
+  order           Order                        @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  orderId         String
+  discount        OrderItemDiscount?
+  inventoryTxns   InventoryTxn[] // Only update inventory after purchase is successful
 
-  @@unique([productVariantId, orderId])
+  @@unique([productOptionId, orderId])
 }
 
 model OrderItemDiscount {
-  id          Int                    @id @default(autoincrement())
-  active      Boolean                @default(true)
-  periodStart DateTime
-  periodEnd   DateTime
-  discount    ProductVariantDiscount @relation(fields: [discountId], references: [id], onDelete: Cascade)
+  id          Int                   @id @default(autoincrement())
+  periodStart DateTime?
+  periodEnd   DateTime?
+  discount    ProductOptionDiscount @relation(fields: [discountId], references: [id], onDelete: Restrict)
   discountId  Int
-  orderItem   OrderItem              @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
-  orderItemId Int
-  createdAt   DateTime               @default(now())
-  updatedAt   DateTime               @updatedAt
+  orderItem   OrderItem             @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+  orderItemId Int                   @unique
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
 }
 
 model Order {
-  id            String              @id @default(uuid())
-  totalCost     Int                 @default(0)
-  status        OrderStatus         @default(unstarted)
-  phoneNumber   String              @default("")
-  paymentMethod PaymentMethod       @default(cash)
-  orderItems    OrderItem[]
-  txns          ProductVariantTxn[]
-  inventoryTxns InventoryTxn[]
+  id            String        @id @default(uuid())
+  totalCost     Int
   purchasedById String
-  createdAt     DateTime            @default(now())
+  status        TxnStatus     @default(unstarted)
+  paymentMethod PaymentMethod @default(cash)
+  orderItems    OrderItem[]
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
   completedAt   DateTime?
 }
